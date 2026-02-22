@@ -3,191 +3,220 @@ import math
 import sys
 import random
 import copy
+from typing import List, Tuple
 
-# u'\u25a1'
+MAX_HILL_CLIMB_ITERATIONS = 100
 
-class queen:
-    def __init__(self, i, j):
-        super().__init__()
-        self.position = [i, j]
-        self.cost_board = [[0 for i in range(0, 8)] for j in range(0, 8)]
-        self.totalViolationsRow = 0
-        self.totalViolationsDiagonal = 0
-        self.total_violations = self.totalViolationsRow + self.totalViolationsDiagonal
-queen_list = []
 
-class board:
-    def __init__(self):
-        super().__init__()
-        self.board = [[ " " for i in range(0, 8)] for j in range(0, 8)]
+class Queen:
+    """Represents a single queen on the board with its position and violation counts."""
+
+    def __init__(self, i: int, j: int) -> None:
+        self.position: List[int] = [i, j]
+        self.cost_board: List[List[int]] = [[0 for _ in range(8)] for _ in range(8)]
+        self.totalViolationsRow: int = 0
+        self.totalViolationsDiagonal: int = 0
+        self.total_violations: int = 0
+
+
+class Board:
+    """8x8 chess board that places queens and solves conflicts via hill climbing."""
+
+    def __init__(self) -> None:
+        self.board: List[List[str]] = [[" " for _ in range(8)] for _ in range(8)]
+        self.board_violations: float = 0
+        self.queens: List[Queen] = []
+
+    def add_queen(self) -> None:
+        """Add a queen to a random row in a random available (empty) column."""
         self.board_violations = 0
+        available_columns = [j for j in range(8) if self.column_is_free(j)]
+        if not available_columns:
+            return
+        j = random.choice(available_columns)
+        i = random.randint(0, 7)
+        self.board[i][j] = "Q"
+        self.queens.append(Queen(i, j))
+        self.queens.sort(key=lambda x: x.position[1])
 
-    """
-        Add queen to random spot on board (cannot be a column where a Queen exists already)
-    """
-    def __add_queen__(self):
-        self.board_violations = 0
-        i = random.randint(0,7)
-        j = random.randint(0,7)
-        if(self.__column_check__(j)):
-            self.board[i][j] = "Q"
-            queen_list.append(queen(i, j))
-            queen_list.sort(key=lambda x:x.position[1])
-        else:
-            return self.__add_queen__()
-
-
-    """
-        Check amount of violations for each queen on the board (returns sum of all violations)
-    """
-    def __check_violations_on_board__(self):
+    def check_violations_on_board(self) -> float:
+        """Return the total number of conflicts on the board (halved to avoid double-counting)."""
         total_board_violations = 0
-        for queen in queen_list:
-            total_board_violations += self.__update_current_queen_violations__(queen)
-        self.board_violations = (total_board_violations / 2)
+        for q in self.queens:
+            total_board_violations += self.update_queen_violations(q)
+        self.board_violations = total_board_violations / 2
         print("Current Board Violations: ", self.board_violations)
         return self.board_violations
 
-    """
-        Check current violations for given queen on the current spot
-        updates queen.total_violations
-    """
-    def __update_current_queen_violations__(self, queen):
-        currentQueenRow = queen.position[0]
-        currentQueenColumn = queen.position[1]
-        totalViolationsRow = 0
+    def update_queen_violations(self, q: Queen) -> int:
+        """Recompute and return the violation count for a single queen."""
+        row = q.position[0]
+        col = q.position[1]
+        violations_row = 0
 
-        #check row
+        # Check row
         for column in range(8):
-            if (column == currentQueenColumn):
+            if column == col:
                 continue
-            if (self.board[currentQueenRow][column] == "Q"):
-                totalViolationsRow = totalViolationsRow + 1
-        queen.totalViolationsRow = totalViolationsRow
+            if self.board[row][column] == "Q":
+                violations_row += 1
+        q.totalViolationsRow = violations_row
 
-        #         check diagonal
-        major = (np.diagonal(np.array(self.board), offset=(currentQueenColumn - currentQueenRow)))
-        minor = (np.diagonal(np.rot90(np.array(self.board)), offset=-np.array(self.board).shape[1] + (currentQueenColumn + currentQueenRow) + 1))
-        queen.totalViolationsDiagonal = math.ceil(( (np.count_nonzero(major == "Q") - 1) + (np.count_nonzero(minor == "Q")-1) ))
-        queen.total_violations = queen.totalViolationsDiagonal + queen.totalViolationsRow
-        return queen.total_violations
+        # Check diagonals
+        board_arr = np.array(self.board)
+        major = np.diagonal(board_arr, offset=(col - row))
+        minor = np.diagonal(
+            np.rot90(board_arr),
+            offset=-board_arr.shape[1] + (col + row) + 1,
+        )
+        q.totalViolationsDiagonal = math.ceil(
+            (np.count_nonzero(major == "Q") - 1)
+            + (np.count_nonzero(minor == "Q") - 1)
+        )
+        q.total_violations = q.totalViolationsDiagonal + q.totalViolationsRow
+        return q.total_violations
 
+    def compute_cost_board(self, q: Queen) -> List[List]:
+        """Build a cost board showing the violation count for the queen at every row in its column.
 
-    """
-        Simulates the queen going to a certain spot
-        get the amount of violations that it would have there
-        returns a cost board with each spot having the violations amount for the queen there
-    """
-    def __check_all_possible_violations_of_queen__(self, queen):
-        original_row = queen.position[0]
-        original_column = queen.position[1]
+        Simulates moving the queen to each row and counts the conflicts it would have there.
+        The queen's current cell is marked with 'Q' while all other rows hold an integer cost.
+        """
+        original_row = q.position[0]
+        original_column = q.position[1]
         cost_board = copy.deepcopy(self.board)
-        currentTotalViolations = queen.total_violations
 
-        #reseting original queen
+        # Temporarily remove the queen
         cost_board[original_row][original_column] = " "
-        
-        #testing every possible move in the column
+
+        # Test every possible row in this column
         for i in range(8):
-            cost_array = []
-            future_position_violation = 0
+            future_violations = 0
 
-            #COLUMNS CHECK
+            # Row conflicts
             for column in range(8):
-                if (column == original_column):
+                if column == original_column:
                     continue
-                if (cost_board[i][column] == "Q"):
-                    future_position_violation = future_position_violation + 1
-            
+                if cost_board[i][column] == "Q":
+                    future_violations += 1
 
-            #DIAGONAL CHECK
-            cost_board_lst = np.array(cost_board)
-            major = (np.diagonal(cost_board_lst, offset=(original_column - i)))
-            minor = (np.diagonal(np.rot90(cost_board_lst), offset=-cost_board_lst.shape[1] + (original_column + i) + 1))
+            # Diagonal conflicts
+            cost_arr = np.array(cost_board)
+            major = np.diagonal(cost_arr, offset=(original_column - i))
+            minor = np.diagonal(
+                np.rot90(cost_arr),
+                offset=-cost_arr.shape[1] + (original_column + i) + 1,
+            )
+            future_violations += list(major).count("Q") + list(minor).count("Q")
 
-            #list(major).count("Q") + list(minor).count("Q")
-            #(np.count_nonzero(major == "Q")) + (np.count_nonzero(minor == "Q"))
-
-            future_position_violation = future_position_violation + list(major).count("Q") + list(minor).count("Q")
-
-            cost_board[i][original_column] = future_position_violation
-            cost_array.append(future_position_violation)
+            cost_board[i][original_column] = future_violations
 
         cost_board[original_row][original_column] = "Q"
         return cost_board
-    
 
-    """
-        Moves queen to lower violations spot
-    """
-    def __move_queen_to_lower_cost__(self, queen, cost_board):
-        original_row = queen.position[0]
-        original_column = queen.position[1]
+    def move_queen_to_lower_cost(
+        self, q: Queen, cost_board: List[List]
+    ) -> Tuple[List[int], int]:
+        """Find the lowest-cost row for the queen in its column and return (position, cost).
+
+        Only moves the queen if a position with fewer or equal violations exists.
+        """
+        original_row = q.position[0]
+        original_column = q.position[1]
         smallest_violations = sys.maxsize
         smallest_position = [original_row, original_column]
 
-        if queen.total_violations == 0:
-            return smallest_position, queen.total_violations
+        if q.total_violations == 0:
+            return smallest_position, q.total_violations
 
         for i in range(8):
-            if (cost_board[i][original_column] != "Q") and (cost_board[i][original_column] <= smallest_violations) and (cost_board[i][original_column] <= queen.total_violations):
-                smallest_violations = cost_board[i][original_column]
+            cell = cost_board[i][original_column]
+            if cell != "Q" and cell <= smallest_violations and cell <= q.total_violations:
+                smallest_violations = cell
                 smallest_position = [i, original_column]
+
         if smallest_violations == sys.maxsize:
-            smallest_violations = queen.total_violations
+            smallest_violations = q.total_violations
 
         return smallest_position, smallest_violations
 
-    def __hill_climbing__(self):
+    def hill_climb(self) -> None:
+        """Run one pass of hill climbing: try to move every conflicted queen to a better row."""
         print("Looking for better queen positions")
-        for queen in queen_list:
-            for update in queen_list:
-                self.__update_current_queen_violations__(update)
-            if queen.total_violations < 1:
+        for q in self.queens:
+            for update in self.queens:
+                self.update_queen_violations(update)
+            if q.total_violations < 1:
                 continue
-            cost_board = copy.deepcopy(self.__check_all_possible_violations_of_queen__(queen))
+            cost_board = copy.deepcopy(self.compute_cost_board(q))
 
             print("BEFORE CHANGE: ")
-            print("Queen total current violations: ", queen.total_violations)
+            print("Queen total current violations: ", q.total_violations)
             print(np.matrix(cost_board))
             print("MOVE QUEEN TO LOWER COST")
-            print("Queen total current violations: ", queen.total_violations)
-            smallest_position, smallest_violations = self.__move_queen_to_lower_cost__(queen, cost_board)
-            self.board[queen.position[0]][queen.position[1]] = " "
+            print("Queen total current violations: ", q.total_violations)
+            smallest_position, smallest_violations = self.move_queen_to_lower_cost(
+                q, cost_board
+            )
+            self.board[q.position[0]][q.position[1]] = " "
 
-            #MOVED QUEEN UPDATE
-            queen.position[0] = smallest_position[0]
-            queen.position[1] = smallest_position[1]
-            queen.total_violations = smallest_violations
+            # Move queen
+            q.position[0] = smallest_position[0]
+            q.position[1] = smallest_position[1]
+            q.total_violations = smallest_violations
 
-            self.board[queen.position[0]][queen.position[1]] = "Q"
+            self.board[q.position[0]][q.position[1]] = "Q"
             print("AFTER CHANGE: ")
-            print("Queen total current violations: ", queen.total_violations)
+            print("Queen total current violations: ", q.total_violations)
             print(np.matrix(self.board))
 
-    def __column_check__(self, j):
+    def column_is_free(self, j: int) -> bool:
+        """Return True if no queen occupies column j."""
         for i in range(8):
-            if(self.board[i][j] == "Q"):
+            if self.board[i][j] == "Q":
                 return False
         return True
 
 
 if __name__ == "__main__":
-    b = board()
+    b = Board()
     for i in range(8):
-        b.__add_queen__()
-        print("After adding new queen Board Violations: ", b.__check_violations_on_board__())
-        while b.__check_violations_on_board__() != 0:
+        b.add_queen()
+        print(
+            "After adding new queen Board Violations: ",
+            b.check_violations_on_board(),
+        )
+        iterations = 0
+        while b.check_violations_on_board() != 0:
+            iterations += 1
+            if iterations > MAX_HILL_CLIMB_ITERATIONS:
+                print(
+                    f"Hill climbing stuck after {MAX_HILL_CLIMB_ITERATIONS} iterations "
+                    f"with {b.board_violations} violations remaining. "
+                    "Performing random restart for this queen."
+                )
+                # Random restart: remove the last-placed queen and re-add it
+                last_queen = b.queens[-1]
+                b.board[last_queen.position[0]][last_queen.position[1]] = " "
+                b.queens.pop()
+                b.add_queen()
+                iterations = 0
+                continue
             print(np.matrix(b.board))
-            b.__hill_climbing__()
+            b.hill_climb()
+
     print("FINAL MATRIX: ")
     print(np.matrix(b.board))
-    b.__check_violations_on_board__()
-    for queen in queen_list:
-        print("Queen Position: ", queen.position)
-        print("Queen Violations: ", queen.total_violations)
+    b.check_violations_on_board()
+    for q in b.queens:
+        print("Queen Position: ", q.position)
+        print("Queen Violations: ", q.total_violations)
         print("----------------")
 
     with open("results.txt", "a") as resultsFile:
-        resultsFile.write(np.array2string(np.matrix(b.board), formatter={'str_kind': lambda x: x}))
+        resultsFile.write(
+            np.array2string(
+                np.matrix(b.board), formatter={"str_kind": lambda x: x}
+            )
+        )
         resultsFile.write("\n\n\n")
